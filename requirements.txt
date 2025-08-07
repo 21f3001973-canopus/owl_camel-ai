@@ -1,4 +1,5 @@
 git+https://github.com/camel-ai/camel.git
+https://github.com/camel-ai/owl.git
 docx2markdown
 gradio
 mcp-simple-arxiv
