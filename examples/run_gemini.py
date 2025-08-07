@@ -11,9 +11,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2023-2024 @ CAMEL-AI.org. All Rights Reserved. =========
+# run_gemini.py
 import sys
 import pathlib
 from dotenv import load_dotenv
+from fastapi import FastAPI, Request
+from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
 from camel.models import ModelFactory
 from camel.toolkits import (
     CodeExecutionToolkit,
@@ -29,116 +35,77 @@ from camel.societies import RolePlaying
 
 from owl.utils import run_society, DocumentProcessingToolkit
 
-base_dir = pathlib.Path(__file__).parent.parent
+# Load environment
+base_dir = pathlib.Path(__file__).parent
 env_path = base_dir / "owl" / ".env"
 load_dotenv(dotenv_path=str(env_path))
-
 set_log_level(level="DEBUG")
+
+# FastAPI setup
+app = FastAPI(title="Gemini OWL Agent API")
+
+# Optional: Allow cross-origin requests (helpful for frontend devs)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class TaskRequest(BaseModel):
+    task: str
 
 
 def construct_society(question: str) -> RolePlaying:
-    r"""Construct a society of agents based on the given question.
-
-    Args:
-        question (str): The task or question to be addressed by the society.
-
-    Returns:
-        RolePlaying: A configured society of agents ready to address the question.
-    """
-
-    # Create models for different components
     models = {
-        "user": ModelFactory.create(
+        name: ModelFactory.create(
             model_platform=ModelPlatformType.GEMINI,
             model_type=ModelType.GEMINI_2_5_PRO_EXP,
             model_config_dict={"temperature": 0},
-        ),
-        "assistant": ModelFactory.create(
-            model_platform=ModelPlatformType.GEMINI,
-            model_type=ModelType.GEMINI_2_5_PRO_EXP,
-            model_config_dict={"temperature": 0},
-        ),
-        "browsing": ModelFactory.create(
-            model_platform=ModelPlatformType.GEMINI,
-            model_type=ModelType.GEMINI_2_5_PRO_EXP,
-            model_config_dict={"temperature": 0},
-        ),
-        "planning": ModelFactory.create(
-            model_platform=ModelPlatformType.GEMINI,
-            model_type=ModelType.GEMINI_2_5_PRO_EXP,
-            model_config_dict={"temperature": 0},
-        ),
-        "video": ModelFactory.create(
-            model_platform=ModelPlatformType.GEMINI,
-            model_type=ModelType.GEMINI_2_5_PRO_EXP,
-            model_config_dict={"temperature": 0},
-        ),
-        "image": ModelFactory.create(
-            model_platform=ModelPlatformType.GEMINI,
-            model_type=ModelType.GEMINI_2_5_PRO_EXP,
-            model_config_dict={"temperature": 0},
-        ),
-        "document": ModelFactory.create(
-            model_platform=ModelPlatformType.GEMINI,
-            model_type=ModelType.GEMINI_2_5_PRO_EXP,
-            model_config_dict={"temperature": 0},
-        ),
+        )
+        for name in [
+            "user", "assistant", "browsing", "planning", "video", "image", "document"
+        ]
     }
 
-    # Configure toolkits
     tools = [
-        *BrowserToolkit(
-            headless=False,  # Set to True for headless mode (e.g., on remote servers)
-            web_agent_model=models["browsing"],
-            planning_agent_model=models["planning"],
-        ).get_tools(),
+        *BrowserToolkit(headless=True, web_agent_model=models["browsing"], planning_agent_model=models["planning"]).get_tools(),
         *CodeExecutionToolkit(sandbox="subprocess", verbose=True).get_tools(),
         *ImageAnalysisToolkit(model=models["image"]).get_tools(),
         SearchToolkit().search_duckduckgo,
-        SearchToolkit().search_google,  # Comment this out if you don't have google search
+        SearchToolkit().search_google,
         SearchToolkit().search_wiki,
         *ExcelToolkit().get_tools(),
         *DocumentProcessingToolkit(model=models["document"]).get_tools(),
         *FileWriteToolkit(output_dir="./").get_tools(),
     ]
 
-    # Configure agent roles and parameters
-    user_agent_kwargs = {"model": models["user"]}
-    assistant_agent_kwargs = {"model": models["assistant"], "tools": tools}
-
-    # Configure task parameters
-    task_kwargs = {
-        "task_prompt": question,
-        "with_task_specify": False,
-    }
-
-    # Create and return the society
-    society = RolePlaying(
-        **task_kwargs,
+    return RolePlaying(
+        task_prompt=question,
+        with_task_specify=False,
         user_role_name="user",
-        user_agent_kwargs=user_agent_kwargs,
+        user_agent_kwargs={"model": models["user"]},
         assistant_role_name="assistant",
-        assistant_agent_kwargs=assistant_agent_kwargs,
+        assistant_agent_kwargs={"model": models["assistant"], "tools": tools},
     )
 
-    return society
 
-
-def main():
-    r"""Main function to run the OWL system with an example question."""
-    # Default research question
-    default_task = "Open Brave search, summarize the github stars, fork counts, etc. of camel-ai's camel framework, and write the numbers into a python file using the plot package, save it locally, and run the generated python file. Note: You have been provided with the necessary tools to complete this task."
-
-    # Override default task if command line argument is provided
-    task = sys.argv[1] if len(sys.argv) > 1 else default_task
-
-    # Construct and run the society
+@app.post("/run-task")
+async def run_task(request: TaskRequest):
+    task = request.task
     society = construct_society(task)
-    answer, chat_history, token_count = run_society(society)
+    try:
+        answer, chat_history, token_count = run_society(society)
+        return JSONResponse({
+            "answer": answer,
+            "token_count": token_count,
+            "chat_history": chat_history,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-    # Output the result
-    print(f"\033[94mAnswer: {answer}\033[0m")
 
-
-if __name__ == "__main__":
-    main()
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "Gemini OWL API running"}
