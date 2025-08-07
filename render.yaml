@@ -10,3 +10,4 @@ services:
     envVars:
       - key: PORT
         value: 8000
+    pythonVersion: 3.10
