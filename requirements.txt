@@ -1,4 +1,3 @@
-tiktoken==0.6.0
 git+https://github.com/camel-ai/camel.git
 docx2markdown
 gradio
