@@ -1,5 +1,5 @@
 tiktoken==0.6.0
-camel-ai[owl]
+git+https://github.com/camel-ai/camel.git
 docx2markdown
 gradio
 mcp-simple-arxiv
